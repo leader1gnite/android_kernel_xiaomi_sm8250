@@ -27,7 +27,6 @@
 #define NVT_BASELINE "nvt_baseline"
 #define NVT_RAW "nvt_raw"
 #define NVT_DIFF "nvt_diff"
-#define NVT_PEN_DIFF "nvt_pen_diff"
 #define NVT_XIAOMI_LOCKDOWN_INFO "tp_lockdown_info"
 
 #define NORMAL_MODE 0x00
@@ -38,16 +37,11 @@
 
 static uint8_t xdata_tmp[8192] = {0};
 static int32_t xdata[4096] = {0};
-static int32_t xdata_pen_tip_x[256] = {0};
-static int32_t xdata_pen_tip_y[256] = {0};
-static int32_t xdata_pen_ring_x[256] = {0};
-static int32_t xdata_pen_ring_y[256] = {0};
 
 static struct proc_dir_entry *NVT_proc_fw_version_entry;
 static struct proc_dir_entry *NVT_proc_baseline_entry;
 static struct proc_dir_entry *NVT_proc_raw_entry;
 static struct proc_dir_entry *NVT_proc_diff_entry;
-static struct proc_dir_entry *NVT_proc_pen_diff_entry;
 static struct proc_dir_entry *NVT_proc_xiaomi_lockdown_info_entry;
 extern int dsi_panel_lockdown_info_read(unsigned char *plockdowninfo);
 
@@ -76,76 +70,6 @@ void nvt_change_mode(uint8_t mode)
 		buf[1] = HANDSHAKING_HOST_READY;
 		CTP_SPI_WRITE(ts->client, buf, 2);
 		usleep_range(20000, 20000);
-	}
-}
-
-int32_t nvt_set_pen_inband_mode_1(uint8_t freq_idx, uint8_t x_term)
-{
-	uint8_t buf[8] = {0};
-	int32_t i = 0;
-	const int32_t retry = 5;
-
-	//---set xdata index to EVENT BUF ADDR---
-	nvt_set_page(ts->mmap->EVENT_BUF_ADDR | EVENT_MAP_HOST_CMD);
-
-	//---set mode---
-	buf[0] = EVENT_MAP_HOST_CMD;
-	buf[1] = 0xC1;
-	buf[2] = 0x02;
-	buf[3] = freq_idx;
-	buf[4] = x_term;
-	CTP_SPI_WRITE(ts->client, buf, 5);
-
-	for (i = 0; i < retry; i++) {
-		buf[0] = EVENT_MAP_HOST_CMD;
-		buf[1] = 0xFF;
-		CTP_SPI_READ(ts->client, buf, 2);
-
-		if (buf[1] == 0x00)
-			break;
-
-		usleep_range(10000, 10000);
-	}
-
-	if (i >= retry) {
-		NVT_ERR("failed, i=%d, buf[1]=0x%02X\n", i, buf[1]);
-		return -1;
-	} else {
-		return 0;
-	}
-}
-
-int32_t nvt_set_pen_normal_mode(void)
-{
-	uint8_t buf[8] = {0};
-	int32_t i = 0;
-	const int32_t retry = 5;
-
-	//---set xdata index to EVENT BUF ADDR---
-	nvt_set_page(ts->mmap->EVENT_BUF_ADDR | EVENT_MAP_HOST_CMD);
-
-	//---set mode---
-	buf[0] = EVENT_MAP_HOST_CMD;
-	buf[1] = 0xC1;
-	buf[2] = 0x04;
-	CTP_SPI_WRITE(ts->client, buf, 3);
-
-	for (i = 0; i < retry; i++) {
-		buf[0] = EVENT_MAP_HOST_CMD;
-		buf[1] = 0xFF;
-		CTP_SPI_READ(ts->client, buf, 2);
-
-		if (buf[1] == 0x00)
-			break;
-
-		usleep_range(10000, 10000);
-	}
-
-	if (i >= retry) {
-		NVT_ERR("failed, i=%d, buf[1]=0x%02X\n", i, buf[1]);
-		return -1;
-	} else {
-		return 0;
 	}
 }
 
@@ -410,43 +334,6 @@ static int32_t c_show(struct seq_file *m, void *v)
 
 /*******************************************************
 Description:
-	Novatek pen 1D diff xdata sequence print show
-	function.
-
-return:
-	Executive outcomes. 0---succeed.
-*******************************************************/
-static int32_t c_pen_1d_diff_show(struct seq_file *m, void *v)
-{
-	int32_t i = 0;
-
-	seq_printf(m, "Tip X:\n");
-	for (i = 0; i < ts->x_num; i++) {
-		seq_printf(m, "%5d, ", xdata_pen_tip_x[i]);
-	}
-	seq_puts(m, "\n");
-	seq_printf(m, "Tip Y:\n");
-	for (i = 0; i < ts->y_num; i++) {
-		seq_printf(m, "%5d, ", xdata_pen_tip_y[i]);
-	}
-	seq_puts(m, "\n");
-	seq_printf(m, "Ring X:\n");
-	for (i = 0; i < ts->x_num; i++) {
-		seq_printf(m, "%5d, ", xdata_pen_ring_x[i]);
-	}
-	seq_puts(m, "\n");
-	seq_printf(m, "Ring Y:\n");
-	for (i = 0; i < ts->y_num; i++) {
-		seq_printf(m, "%5d, ", xdata_pen_ring_y[i]);
-	}
-	seq_puts(m, "\n");
-
-	seq_printf(m, "\n\n");
-	return 0;
-}
-
-/*******************************************************
-Description:
 	Novatek touchscreen xdata sequence print start
 	function.
 
@@ -500,13 +387,6 @@ const struct seq_operations nvt_seq_ops = {
 	.next   = c_next,
 	.stop   = c_stop,
 	.show   = c_show
-};
-
-const struct seq_operations nvt_pen_diff_seq_ops = {
-	.start  = c_start,
-	.next   = c_next,
-	.stop   = c_stop,
-	.show   = c_pen_1d_diff_show
 };
 
 /*******************************************************
@@ -756,87 +636,6 @@ static const struct file_operations nvt_diff_fops = {
 };
 #endif
 
-/*******************************************************
-Description:
-	Novatek touchscreen /proc/nvt_pen_diff open function.
-
-return:
-	Executive outcomes. 0---succeed. negative---failed.
-*******************************************************/
-static int32_t nvt_pen_diff_open(struct inode *inode, struct file *file)
-{
-	if (mutex_lock_interruptible(&ts->lock)) {
-		return -ERESTARTSYS;
-	}
-
-	NVT_LOG("++\n");
-
-#if NVT_TOUCH_ESD_PROTECT
-	nvt_esd_check_enable(false);
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
-
-	if (nvt_set_pen_inband_mode_1(0xFF, 0x00)) {
-		mutex_unlock(&ts->lock);
-		return -EAGAIN;
-	}
-
-	if (nvt_check_fw_reset_state(RESET_STATE_NORMAL_RUN)) {
-		mutex_unlock(&ts->lock);
-		return -EAGAIN;
-	}
-
-	if (nvt_clear_fw_status()) {
-		mutex_unlock(&ts->lock);
-		return -EAGAIN;
-	}
-
-	nvt_change_mode(TEST_MODE_2);
-
-	if (nvt_check_fw_status()) {
-		mutex_unlock(&ts->lock);
-		return -EAGAIN;
-	}
-
-	if (nvt_get_fw_info()) {
-		mutex_unlock(&ts->lock);
-		return -EAGAIN;
-	}
-
-	nvt_read_get_num_mdata(ts->mmap->PEN_1D_DIFF_TIP_X_ADDR, xdata_pen_tip_x, ts->x_num);
-	nvt_read_get_num_mdata(ts->mmap->PEN_1D_DIFF_TIP_Y_ADDR, xdata_pen_tip_y, ts->y_num);
-	nvt_read_get_num_mdata(ts->mmap->PEN_1D_DIFF_RING_X_ADDR, xdata_pen_ring_x, ts->x_num);
-	nvt_read_get_num_mdata(ts->mmap->PEN_1D_DIFF_RING_Y_ADDR, xdata_pen_ring_y, ts->y_num);
-
-	nvt_change_mode(NORMAL_MODE);
-
-	nvt_set_pen_normal_mode();
-
-	nvt_check_fw_reset_state(RESET_STATE_NORMAL_RUN);
-
-	mutex_unlock(&ts->lock);
-
-	NVT_LOG("--\n");
-
-	return seq_open(file, &nvt_pen_diff_seq_ops);
-}
-
-#ifdef HAVE_PROC_OPS
-static const struct proc_ops nvt_pen_diff_fops = {
-	.proc_open = nvt_pen_diff_open,
-	.proc_read = seq_read,
-	.proc_lseek = seq_lseek,
-	.proc_release = seq_release,
-};
-#else
-static const struct file_operations nvt_pen_diff_fops = {
-	.owner = THIS_MODULE,
-	.open = nvt_pen_diff_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release,
-};
-#endif
-
 static int nvt_xiaomi_lockdown_info_show(struct seq_file *m, void *v)
 {
 	int ret;
@@ -909,16 +708,6 @@ int32_t nvt_extra_proc_init(void)
 		NVT_LOG("create proc/%s Succeeded!\n", NVT_DIFF);
 	}
 
-	if (ts->pen_support) {
-		NVT_proc_pen_diff_entry = proc_create(NVT_PEN_DIFF, 0444, NULL,&nvt_pen_diff_fops);
-		if (NVT_proc_pen_diff_entry == NULL) {
-			NVT_ERR("create proc/%s Failed!\n", NVT_PEN_DIFF);
-			return -ENOMEM;
-		} else {
-			NVT_LOG("create proc/%s Succeeded!\n", NVT_PEN_DIFF);
-		}
-	}
-
 	NVT_proc_xiaomi_lockdown_info_entry = proc_create(NVT_XIAOMI_LOCKDOWN_INFO, 0444, NULL, &nvt_xiaomi_lockdown_info_fops);
 	if (NVT_proc_xiaomi_lockdown_info_entry == NULL) {
 		NVT_ERR("create proc/%s Failed!\n", NVT_XIAOMI_LOCKDOWN_INFO);
@@ -962,14 +751,6 @@ void nvt_extra_proc_deinit(void)
 		remove_proc_entry(NVT_DIFF, NULL);
 		NVT_proc_diff_entry = NULL;
 		NVT_LOG("Removed /proc/%s\n", NVT_DIFF);
-	}
-
-	if (ts->pen_support) {
-		if (NVT_proc_pen_diff_entry != NULL) {
-			remove_proc_entry(NVT_PEN_DIFF, NULL);
-			NVT_proc_pen_diff_entry = NULL;
-			NVT_LOG("Removed /proc/%s\n", NVT_PEN_DIFF);
-		}
 	}
 }
 #endif

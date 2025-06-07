@@ -884,6 +884,5 @@ void Boot_Update_Firmware(struct work_struct *work)
 	}
 	nvt_get_fw_info();
 	mutex_unlock(&ts->lock);
-	switch_pen_input_device();
 }
 #endif /* BOOT_UPDATE_FIRMWARE */

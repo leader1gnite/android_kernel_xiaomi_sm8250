@@ -55,11 +55,6 @@ uint8_t esd_check = false;
 uint8_t esd_retry = 0;
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-extern int pen_charge_state_notifier_register_client(struct notifier_block *nb);
-extern int pen_charge_state_notifier_unregister_client(struct notifier_block *nb);
-#endif /* NVT_PEN_CONNECT_STRATEGY */
-
 #if NVT_TOUCH_EXT_PROC
 extern int32_t nvt_extra_proc_init(void);
 extern void nvt_extra_proc_deinit(void);
@@ -96,8 +91,6 @@ static int nvt_fb_notifier_callback(struct notifier_block *self, unsigned long e
 static void nvt_ts_early_suspend(struct early_suspend *h);
 static void nvt_ts_late_resume(struct early_suspend *h);
 #endif
-static void release_touch_event(void);
-static void release_pen_event(void);
 static void nvt_all_para_recovery(void);
 
 extern int dsi_panel_lockdown_info_read(unsigned char *plockdowninfo);
@@ -129,7 +122,6 @@ const uint16_t gesture_key_array[] = {
 	KEY_POWER,  //GESTURE_SLIDE_DOWN
 	KEY_POWER,  //GESTURE_SLIDE_LEFT
 	KEY_POWER,  //GESTURE_SLIDE_RIGHT
-	KEY_WAKEUP,  //GESTURE_PEN_ONE_CLICK
 };
 #endif
 
@@ -830,10 +822,6 @@ info_retry:
 	ts->abs_y_max = (uint16_t)((buf[7] << 8) | buf[8]);
 	ts->max_button_num = buf[11];
 	ts->nvt_pid = (uint16_t)((buf[36] << 8) | buf[35]);
-	if (ts->pen_support) {
-		ts->x_gang_num = buf[37];
-		ts->y_gang_num = buf[38];
-	}
 	NVT_LOG("fw_ver=0x%02X, fw_type=0x%02X, PID=0x%04X\n", ts->fw_ver, buf[14], ts->nvt_pid);
 
 	ret = 0;
@@ -1068,7 +1056,6 @@ static void nvt_flash_proc_deinit(void)
 #define GESTURE_SLIDE_DOWN      22
 #define GESTURE_SLIDE_LEFT      23
 #define GESTURE_SLIDE_RIGHT     24
-#define PEN_GESTURE_ONE_CLICK   25
 /* customized gesture id */
 #define DATA_PROTOCOL           30
 
@@ -1113,12 +1100,7 @@ void nvt_ts_wakeup_gesture_report(uint8_t gesture_id, uint8_t *data)
 			break;
 		case GESTURE_DOUBLE_CLICK:
 			NVT_LOG("Gesture : Double Click.\n");
-			if (ts->db_wakeup & 0x01) {
-				keycode = gesture_key_array[3];
-			} else {
-				NVT_LOG("Gesture : Double Click Not Enable.\n");
-				keycode = 0;
-			}
+			keycode = gesture_key_array[3];
 			break;
 		case GESTURE_WORD_Z:
 			NVT_LOG("Gesture : Word-Z.\n");
@@ -1167,127 +1149,7 @@ void nvt_ts_wakeup_gesture_report(uint8_t gesture_id, uint8_t *data)
 		input_sync(ts->input_dev);
 	}
 }
-
-/*******************************************************
-Description:
-	pen gesture key report function 
-	feature: off screen shorthand 
-return:
-	n.a.
-*******************************************************/
-void nvt_ts_pen_gesture_report(uint8_t pen_gesture_id)
-{
-	uint32_t keycode = 0;
-
-	NVT_LOG("pen_gesture_id = %d\n", pen_gesture_id);
-
-	switch (pen_gesture_id) {
-		case PEN_GESTURE_ONE_CLICK:
-			NVT_LOG("Gesture : Pen One Click.\n");
-			if (ts->db_wakeup & 0x02) {
-				input_report_abs(ts->pen_input_dev, ABS_X, 1);
-				input_report_abs(ts->pen_input_dev, ABS_Y, 1);
-				input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 1);
-				input_report_key(ts->pen_input_dev, BTN_TOUCH, 1);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_X, 1);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 1);
-				input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 1);
-				input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 1);
-				input_sync(ts->pen_input_dev);
-				//rlease
-				input_report_abs(ts->pen_input_dev, ABS_X, 0);
-				input_report_abs(ts->pen_input_dev, ABS_Y, 0);
-				input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
-				input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
-				input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
-				input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
-				input_sync(ts->pen_input_dev);
-			} else {
-				NVT_LOG("Gesture : Pen Click Not Enable.\n");
-				keycode = 0;
-			}
-			break;
-		default:
-			break;
-	}
-}
 #endif
-
-int switch_pen_input_device(void) {
-	uint8_t buf[8] = {0};
-	int32_t ret = 0;
-	int enable = 0;
-
-	NVT_LOG("++\n");
-	if (!bTouchIsAwake || !ts) {
-		NVT_LOG("touch suspend, stop switch");
-		return ret;
-	}
-
-	msleep(35);
-	mutex_lock(&ts->pen_switch_lock);
-	enable = ((ts->pen_bluetooth_connect) && !(ts->pen_charge_connect) && !(ts->game_mode_enable));
-	NVT_LOG("pen_bluetooth_connect is %d, pen_charge_connect is %d, game_mode_enable %d, %s pen input device\n",
-	ts->pen_bluetooth_connect, ts->pen_charge_connect, ts->game_mode_enable, enable ? "ENABLE" : "DISABLE");
-	//---set xdata index to EVENT BUF ADDR---
-	ret = nvt_set_page(ts->mmap->EVENT_BUF_ADDR | EVENT_MAP_HOST_CMD);
-	if (ret < 0) {
-		NVT_ERR("Set event buffer index fail!\n");
-		goto nvt_set_pen_enable_out;
-	}
-
-	buf[0] = EVENT_MAP_HOST_CMD;
-	buf[1] = 0x7B;
-	buf[2] = !!enable;
-	ret = CTP_SPI_WRITE(ts->client, buf, 3);
-	if (ret < 0)
-		NVT_ERR("set pen %s failed!\n", enable ? "DISABLE" : "ENABLE");
-
-nvt_set_pen_enable_out:
-	mutex_unlock(&ts->pen_switch_lock);
-	NVT_LOG("--\n");
-
-	return ret;
-}
-
-static void release_touch_event(void) {
-	int i = 0;
-
-	if (ts) {
-		/* release all touches */
-#if MT_PROTOCOL_B
-		for (i = 0; i < ts->max_touch_num; i++) {
-			input_mt_slot(ts->input_dev, i);
-			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
-			input_report_abs(ts->input_dev, ABS_MT_PRESSURE, 0);
-			input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
-		}
-#endif
-		input_report_key(ts->input_dev, BTN_TOUCH, 0);
-#if !MT_PROTOCOL_B
-		input_mt_sync(ts->input_dev);
-#endif
-		input_sync(ts->input_dev);
-	}
-}
-
-static void release_pen_event(void) {
-	if (ts && ts->pen_input_dev) {
-		input_report_abs(ts->pen_input_dev, ABS_X, 0);
-		input_report_abs(ts->pen_input_dev, ABS_Y, 0);
-		input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
-		input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
-		input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
-		input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
-		input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
-		input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
-		input_report_key(ts->pen_input_dev, KEY_PAGEDOWN, 0);
-		input_report_key(ts->pen_input_dev, KEY_PAGEUP, 0);
-		input_sync(ts->pen_input_dev);
-	}
-}
 
 /*******************************************************
 Description:
@@ -1310,12 +1172,6 @@ static int32_t nvt_parse_dt(struct device *dev)
 #endif
 	ts->irq_gpio = of_get_named_gpio_flags(np, "novatek,irq-gpio", 0, &ts->irq_flags);
 	NVT_LOG("novatek,irq-gpio=%d\n", ts->irq_gpio);
-
-	ts->pen_support = of_property_read_bool(np, "novatek,pen-support");
-	NVT_LOG("novatek,pen-support=%d\n", ts->pen_support);
-
-	ts->stylus_resol_double = of_property_read_bool(np, "novatek,stylus-resol-double");
-	NVT_LOG("novatek,stylus-resol-double=%d\n", ts->stylus_resol_double);
 
 	ret = of_property_read_u32(np, "novatek,spi-rd-fast-addr", &SPI_RD_FAST_ADDR);
 	if (ret) {
@@ -1421,8 +1277,6 @@ static int32_t nvt_parse_dt(struct device *dev)
 	ts->reset_gpio = NVTTOUCH_RST_PIN;
 #endif
 	ts->irq_gpio = NVTTOUCH_INT_PIN;
-	ts->pen_support = false;
-	ts->stylus_resol_double = false;
 	return 0;
 }
 #endif
@@ -1618,36 +1472,6 @@ static void nvt_esd_check_func(struct work_struct *work)
 }
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
-#define PEN_DATA_LEN 14
-#if CHECK_PEN_DATA_CHECKSUM
-static int32_t nvt_ts_pen_data_checksum(uint8_t *buf, uint8_t length)
-{
-	uint8_t checksum = 0;
-	int32_t i = 0;
-
-	// Calculate checksum
-	for (i = 0; i < length - 1; i++) {
-		checksum += buf[i];
-	}
-	checksum = (~checksum + 1);
-
-	// Compare ckecksum and dump fail data
-	if (checksum != buf[length - 1]) {
-		NVT_ERR("pen packet checksum not match. (buf[%d]=0x%02X, checksum=0x%02X)\n",
-			length - 1, buf[length - 1], checksum);
-		//--- dump pen buf ---
-		for (i = 0; i < length; i++) {
-			printk("%02X ", buf[i]);
-		}
-		printk("\n");
-
-		return -1;
-	}
-
-	return 0;
-}
-#endif // #if CHECK_PEN_DATA_CHECKSUM
-
 #if NVT_TOUCH_WDT_RECOVERY
 static uint8_t recovery_cnt = 0;
 static uint8_t nvt_wdt_fw_recovery(uint8_t *point_data)
@@ -1746,7 +1570,7 @@ return:
 static irqreturn_t nvt_ts_work_func(int irq, void *data)
 {
 	int32_t ret = -1;
-	uint8_t point_data[POINT_DATA_LEN + PEN_DATA_LEN + 1 + DUMMY_BYTES] = {0};
+	uint8_t point_data[POINT_DATA_LEN + 1 + DUMMY_BYTES] = {0};
 	uint32_t position = 0;
 	uint32_t input_x = 0;
 	uint32_t input_y = 0;
@@ -1758,16 +1582,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 #endif /* MT_PROTOCOL_B */
 	int32_t i = 0;
 	int32_t finger_cnt = 0;
-	uint8_t pen_format_id = 0;
-	uint32_t pen_x = 0;
-	uint32_t pen_y = 0;
-	uint32_t pen_pressure = 0;
-	uint32_t pen_distance = 0;
-	int8_t pen_tilt_x = 0;
-	int8_t pen_tilt_y = 0;
-	uint32_t pen_btn1 = 0;
-	uint32_t pen_btn2 = 0;
-	uint32_t pen_battery = 0;
 
 	static struct task_struct *touch_task = NULL;
 	struct sched_param par = { .sched_priority = MAX_RT_PRIO - 1};
@@ -1793,14 +1607,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 		}
 	}
 
-#if NVT_SUPER_RESOLUTION_N
 	ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
-#else /* #if NVT_SUPER_RESOLUTION_N */
-	if (ts->pen_support)
-		ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + PEN_DATA_LEN + 1);
-	else
-		ret = CTP_SPI_READ(ts->client, point_data, POINT_DATA_LEN + 1);
-#endif /* #if NVT_SUPER_RESOLUTION_N */
 	if (ret < 0) {
 		NVT_ERR("CTP_SPI_READ failed.(%d)\n", ret);
 		goto XFER_ERROR;
@@ -1823,8 +1630,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 		}
 		nvt_read_fw_history(ts->mmap->MMAP_HISTORY_EVENT0);
 		nvt_read_fw_history(ts->mmap->MMAP_HISTORY_EVENT1);
-		release_touch_event();
-		release_pen_event();
 		if (nvt_get_dbgfw_status()) {
 			if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
 				NVT_ERR("use built-in fw");
@@ -1834,7 +1639,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 			nvt_update_firmware(ts->fw_name);
 		}
 		nvt_all_para_recovery();
-		switch_pen_input_device();
 		goto XFER_ERROR;
 	}
 #endif /* #if NVT_TOUCH_WDT_RECOVERY */
@@ -1860,12 +1664,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	if (bTouchIsAwake == 0) {
 		input_id = (uint8_t)(point_data[1] >> 3);
 		nvt_ts_wakeup_gesture_report(input_id, point_data);
-		if (ts->pen_support) {
-			pen_format_id = point_data[66];
-			nvt_ts_pen_gesture_report(pen_format_id);
-		}
 		mutex_unlock(&ts->lock);
-
 		return IRQ_HANDLED;
 	}
 #endif
@@ -1981,72 +1780,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 #endif
 
 	input_sync(ts->input_dev);
-
-	if (ts->pen_support) {
-/*
-		//--- dump pen buf ---
-		printk("%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
-			point_data[66], point_data[67], point_data[68], point_data[69], point_data[70],
-			point_data[71], point_data[72], point_data[73], point_data[74], point_data[75],
-			point_data[76], point_data[77], point_data[78], point_data[79]);
-*/
-#if CHECK_PEN_DATA_CHECKSUM
-		if (nvt_ts_pen_data_checksum(&point_data[66], PEN_DATA_LEN)) {
-			// pen data packet checksum not match, skip it
-			goto XFER_ERROR;
-		}
-#endif // #if CHECK_PEN_DATA_CHECKSUM
-
-		// parse and handle pen report
-		pen_format_id = point_data[66];
-		if (pen_format_id != 0xFF) {
-			if (pen_format_id == 0x01) {
-				// report pen data
-				pen_x = (uint32_t)(point_data[67] << 8) + (uint32_t)(point_data[68]);
-				pen_y = (uint32_t)(point_data[69] << 8) + (uint32_t)(point_data[70]);
-				pen_pressure = (uint32_t)(point_data[71] << 8) + (uint32_t)(point_data[72]);
-				pen_tilt_x = (int32_t)point_data[73];
-				pen_tilt_y = (int32_t)point_data[74];
-				pen_distance = (uint32_t)(point_data[75] << 8) + (uint32_t)(point_data[76]);
-				pen_btn1 = (uint32_t)(point_data[77] & 0x01);
-				pen_btn2 = (uint32_t)((point_data[77] >> 1) & 0x01);
-				pen_battery = (uint32_t)point_data[78];
-//				printk("x=%d,y=%d,p=%d,tx=%d,ty=%d,d=%d,b1=%d,b2=%d,bat=%d\n", pen_x, pen_y, pen_pressure,
-//						pen_tilt_x, pen_tilt_y, pen_distance, pen_btn1, pen_btn2, pen_battery);
-
-				input_report_abs(ts->pen_input_dev, ABS_X, pen_x);
-				input_report_abs(ts->pen_input_dev, ABS_Y, pen_y);
-				input_report_abs(ts->pen_input_dev, ABS_PRESSURE, pen_pressure);
-				input_report_key(ts->pen_input_dev, BTN_TOUCH, !!pen_pressure);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_X, pen_tilt_x);
-				input_report_abs(ts->pen_input_dev, ABS_TILT_Y, pen_tilt_y);
-				input_report_abs(ts->pen_input_dev, ABS_DISTANCE, pen_distance);
-				input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, !!pen_distance || !!pen_pressure);
-				input_report_key(ts->pen_input_dev, KEY_PAGEDOWN, pen_btn1);
-				input_report_key(ts->pen_input_dev, KEY_PAGEUP, pen_btn2);
-				// TBD: pen battery event report
-				// NVT_LOG("pen_battery=%d\n", pen_battery);
-			} else if (pen_format_id == 0xF0) {
-				// report Pen ID
-			} else {
-				NVT_ERR("Unknown pen format id!\n");
-				goto XFER_ERROR;
-			}
-		} else { // pen_format_id = 0xFF, i.e. no pen present
-			input_report_abs(ts->pen_input_dev, ABS_X, 0);
-			input_report_abs(ts->pen_input_dev, ABS_Y, 0);
-			input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
-			input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
-			input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
-			input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
-			input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
-			input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
-			input_report_key(ts->pen_input_dev, KEY_PAGEDOWN, 0);
-			input_report_key(ts->pen_input_dev, KEY_PAGEUP, 0);
-		}
-
-		input_sync(ts->pen_input_dev);
-	} /* if (ts->pen_support) */
 
 XFER_ERROR:
 
@@ -2301,13 +2034,6 @@ static void nvt_init_touchmode_data(void)
 	xiaomi_touch_interfaces.touch_mode[Touch_Resist_RF][SET_CUR_VALUE] = 0;
 	xiaomi_touch_interfaces.touch_mode[Touch_Resist_RF][GET_CUR_VALUE] = 0;
 
-	/* Stylus */
-	xiaomi_touch_interfaces.touch_mode[Touch_Pen_ENABLE][GET_MAX_VALUE] = 18;
-	xiaomi_touch_interfaces.touch_mode[Touch_Pen_ENABLE][GET_MIN_VALUE] = -1;
-	xiaomi_touch_interfaces.touch_mode[Touch_Pen_ENABLE][GET_DEF_VALUE] = 0;
-	xiaomi_touch_interfaces.touch_mode[Touch_Pen_ENABLE][SET_CUR_VALUE] = 0;
-	xiaomi_touch_interfaces.touch_mode[Touch_Pen_ENABLE][GET_CUR_VALUE] = 0;
-
 	for (i = 0; i < Touch_Mode_NUM; i++) {
 		NVT_LOG("mode:%d, set cur:%d, get cur:%d, def:%d min:%d max:%d\n",
 			i,
@@ -2403,7 +2129,6 @@ static void update_touchfeature_value_work(struct work_struct *work) {
 		xiaomi_touch_interfaces.touch_mode[mode_type[i]][GET_CUR_VALUE] = temp_set_value;
 		if (mode_type[i] == Touch_Game_Mode) {
 			ts->game_mode_enable = temp_set_value;
-			switch_pen_input_device();
 		}
 		NVT_LOG("set mode:%d = %d", mode_type[i], temp_set_value);
 	}
@@ -2474,22 +2199,6 @@ static int nvt_set_cur_value(int nvt_mode, int nvt_value)
 	if (nvt_mode == Touch_Doubletap_Mode && ts && nvt_value >= 0) {
 		ts-> db_wakeup = nvt_value ? (ts-> db_wakeup | 0x01) : (ts-> db_wakeup & 0xFE);
 		nvt_set_gesture_mode();
-		return 0;
-	} else if (nvt_mode == Touch_Pen_ENABLE && ts && nvt_value >= 0) {
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-		if (!!(nvt_value >> 4))
-			ts->pen_bluetooth_connect = 1;
-		else
-			ts->pen_bluetooth_connect = 0;
-
-		ts->db_wakeup = ts->db_wakeup & 0xFD; /* close off screen short hand by defalut */
-		dsi_panel_doubleclick_enable(!!ts->db_wakeup);
-		NVT_LOG("nvt_value is 0x%02X, pen status is %s, pen id is %d, pen_bluetooth_connect is %d, db_wakeup is 0x%02X",
-					nvt_value, (nvt_value >> 4) ? "connect":"disconnct", nvt_value & 0x0F, ts->pen_bluetooth_connect, ts->db_wakeup);
-#endif
-
-		switch_pen_input_device();
-		release_pen_event();
 		return 0;
 	}
 
@@ -2663,29 +2372,6 @@ static u8 nvt_panel_display_read(void)
 	}
 	NVT_LOG("%s Get panel display: %d\n", __func__, value);
 	return value;
-}
-#endif
-
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-static int nvt_pen_charge_state_notifier_callback(struct notifier_block *self, unsigned long event, void *data) {
-	//ts->pen_is_charge = !!event;
-	ts->pen_charge_connect = !!event;
-	release_pen_event();
-	schedule_work(&ts->pen_charge_state_change_work);
-	return 0;
-}
-
-static void nvt_pen_charge_state_change_work(struct work_struct *work)
-{
-	NVT_LOG("++\n");
-	if(!ts) {
-		NVT_LOG("ts is not exist, stop work");
-		goto nvt_pen_charge_state_change_work_out;
-	}
-	switch_pen_input_device();
-
-nvt_pen_charge_state_change_work_out:
-	NVT_LOG("--\n");
 }
 #endif
 
@@ -3126,58 +2812,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 		goto err_input_register_device_failed;
 	}
 
-	if (ts->pen_support) {
-		//---allocate pen input device---
-		ts->pen_input_dev = input_allocate_device();
-		if (ts->pen_input_dev == NULL) {
-			NVT_ERR("allocate pen input device failed\n");
-			ret = -ENOMEM;
-			goto err_pen_input_dev_alloc_failed;
-		}
-
-		//---set pen input device info.---
-		ts->pen_input_dev->evbit[0] = BIT_MASK(EV_SYN) | BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
-		ts->pen_input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
-		ts->pen_input_dev->keybit[BIT_WORD(BTN_TOOL_PEN)] |= BIT_MASK(BTN_TOOL_PEN);
-		//ts->pen_input_dev->keybit[BIT_WORD(BTN_TOOL_RUBBER)] |= BIT_MASK(BTN_TOOL_RUBBER);
-		ts->pen_input_dev->keybit[BIT_WORD(KEY_PAGEDOWN)] |= BIT_MASK(KEY_PAGEDOWN);
-		ts->pen_input_dev->keybit[BIT_WORD(KEY_PAGEUP)] |= BIT_MASK(KEY_PAGEUP);
-		ts->pen_input_dev->propbit[0] = BIT(INPUT_PROP_DIRECT);
-
-#if NVT_SUPER_RESOLUTION_N
-		input_set_abs_params(ts->pen_input_dev, ABS_X, 0, ts->abs_x_max * NVT_SUPER_RESOLUTION_N - 1, 0, 0);
-		input_set_abs_params(ts->pen_input_dev, ABS_Y, 0, ts->abs_y_max * NVT_SUPER_RESOLUTION_N - 1, 0, 0);
-#else /* #if NVT_SUPER_RESOLUTION_N */
-		if (ts->stylus_resol_double) {
-			input_set_abs_params(ts->pen_input_dev, ABS_X, 0, ts->abs_x_max * 2 - 1, 0, 0);
-			input_set_abs_params(ts->pen_input_dev, ABS_Y, 0, ts->abs_y_max * 2 - 1, 0, 0);
-		} else {
-			input_set_abs_params(ts->pen_input_dev, ABS_X, 0, ts->abs_x_max - 1, 0, 0);
-			input_set_abs_params(ts->pen_input_dev, ABS_Y, 0, ts->abs_y_max - 1, 0, 0);
-		}
-#endif /* #if NVT_SUPER_RESOLUTION_N */
-		input_set_abs_params(ts->pen_input_dev, ABS_PRESSURE, 0, PEN_PRESSURE_MAX, 0, 0);
-		input_set_abs_params(ts->pen_input_dev, ABS_DISTANCE, 0, PEN_DISTANCE_MAX, 0, 0);
-		input_set_abs_params(ts->pen_input_dev, ABS_TILT_X, PEN_TILT_MIN, PEN_TILT_MAX, 0, 0);
-		input_set_abs_params(ts->pen_input_dev, ABS_TILT_Y, PEN_TILT_MIN, PEN_TILT_MAX, 0, 0);
-
-#if WAKEUP_GESTURE
-		input_set_capability(ts->pen_input_dev, EV_KEY, KEY_WAKEUP);
-#endif
-
-		sprintf(ts->pen_phys, "input/pen");
-		ts->pen_input_dev->name = NVT_PEN_NAME;
-		ts->pen_input_dev->phys = ts->pen_phys;
-		ts->pen_input_dev->id.bustype = BUS_SPI;
-
-		//---register pen input device---
-		ret = input_register_device(ts->pen_input_dev);
-		if (ret) {
-			NVT_ERR("register pen input device (%s) failed. ret=%d\n", ts->pen_input_dev->name, ret);
-			goto err_pen_input_register_device_failed;
-		}
-	} /* if (ts->pen_support) */
-
 	//---set int-pin & request irq---
 	client->irq = gpio_to_irq(ts->irq_gpio);
 	if (client->irq) {
@@ -3199,7 +2833,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	init_completion(&ts->dev_pm_suspend_completion);
 	ts->gesture_command_delayed = -1;
 	ts->fw_debug = false;
-	ts->pen_input_dev_enable = 0;
 
 	ts->lkdown_readed = false;
 	nvt_lockdown_wq = alloc_workqueue("nvt_lockdown_wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
@@ -3288,21 +2921,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	INIT_WORK(&ts->set_touchfeature_work, update_touchfeature_value_work);
 #endif
 
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-	ts->pen_bluetooth_connect = 0;
-	ts->pen_charge_connect = false;
-	ts->game_mode_enable = 0;
-	mutex_init(&ts->pen_switch_lock);
-	INIT_WORK(&ts->pen_charge_state_change_work, nvt_pen_charge_state_change_work);
-	ts->pen_charge_state_notifier.notifier_call = nvt_pen_charge_state_notifier_callback;
-	ret = pen_charge_state_notifier_register_client(&ts->pen_charge_state_notifier);
-	if(ret) {
-		NVT_ERR("register pen charge state change notifier failed. ret=%d\n", ret);
-		goto err_register_pen_charge_state_failed;
-	}
-
-#endif
-
 #if defined(CONFIG_DRM_PANEL)
 	ts->drm_panel_notif.notifier_call = nvt_drm_panel_notifier_callback;
 	ret = mi_drm_register_client(&ts->drm_panel_notif);
@@ -3377,12 +2995,6 @@ err_register_fb_notif_failed:
 	unregister_early_suspend(&ts->early_suspend);
 err_register_early_suspend_failed:
 #endif
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
-		NVT_ERR("Error occurred while unregistering pen charge state notifier.\n");
-err_register_pen_charge_state_failed:
-#endif
-	mutex_destroy(&ts->pen_switch_lock);
 	destroy_workqueue(ts->set_touchfeature_wq);
 #if CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 err_create_set_touchfeature_work_queue:
@@ -3433,18 +3045,6 @@ err_create_nvt_lockdown_wq_failed:
 #endif
 	free_irq(client->irq, ts);
 err_int_request_failed:
-	if (ts->pen_support) {
-		input_unregister_device(ts->pen_input_dev);
-		ts->pen_input_dev = NULL;
-	}
-err_pen_input_register_device_failed:
-	if (ts->pen_support) {
-		if (ts->pen_input_dev) {
-			input_free_device(ts->pen_input_dev);
-			ts->pen_input_dev = NULL;
-		}
-	}
-err_pen_input_dev_alloc_failed:
 	input_unregister_device(ts->input_dev);
 	ts->input_dev = NULL;
 err_input_register_device_failed:
@@ -3514,11 +3114,6 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 	nvt_flash_proc_deinit();
 #endif
 
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-	if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
-		NVT_ERR("Error occurred while unregistering pen status switch state notifier.\n");
-#endif
-	mutex_destroy(&ts->pen_switch_lock);
 	destroy_workqueue(ts->event_wq);
 	ts->event_wq = NULL;
 
@@ -3559,13 +3154,6 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 	mutex_destroy(&ts->lock);
 
 	nvt_gpio_deconfig(ts);
-
-	if (ts->pen_support) {
-		if (ts->pen_input_dev) {
-			input_unregister_device(ts->pen_input_dev);
-			ts->pen_input_dev = NULL;
-		}
-	}
 
 	if (ts->input_dev) {
 		input_unregister_device(ts->input_dev);
@@ -3623,11 +3211,6 @@ static void nvt_ts_shutdown(struct spi_device *client)
 	nvt_flash_proc_deinit();
 #endif
 
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-	if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
-		NVT_ERR("Error occurred while unregistering pen status switch state notifier.\n");
-#endif
-	mutex_destroy(&ts->pen_switch_lock);
 	destroy_workqueue(ts->event_wq);
 	ts->event_wq = NULL;
 
@@ -3678,7 +3261,6 @@ static int32_t nvt_ts_suspend(struct device *dev)
 	uint8_t buf[4] = {0};
 #if MT_PROTOCOL_B
 	uint32_t i = 0;
-	int enable = 0;
 #endif
 
 	if (!bTouchIsAwake) {
@@ -3704,9 +3286,8 @@ static int32_t nvt_ts_suspend(struct device *dev)
 
 	bTouchIsAwake = 0;
 
-	if (ts->db_wakeup & 0x01 || ts->db_wakeup & 0x02) {
+	if (ts->db_wakeup) {
 		/*---write command to enter "wakeup gesture mode"---*/
-		/*DoubleClick wakeup CMD was sent by display to meet timing*/
 
 		buf[0] = EVENT_MAP_HOST_CMD;
 		buf[1] = 0x13;
@@ -3714,15 +3295,9 @@ static int32_t nvt_ts_suspend(struct device *dev)
 
 		enable_irq_wake(ts->client->irq);
 
-		enable = (ts->db_wakeup & 0x02);
-		memset(buf, 0, sizeof(buf));
-		buf[0] = EVENT_MAP_HOST_CMD;
-		buf[1] = 0x7B;
-		buf[2] = !!enable;
-		msleep(250);
-		CTP_SPI_WRITE(ts->client, buf, 3);
-		NVT_LOG("%s pen wakeup gesture\n", enable ? "Enable" : "Disable");
-	} else if (ts->db_wakeup == 0) {
+		NVT_LOG("Enabled touch wakeup gesture\n");
+
+	} else {
 		/*---write command to enter "deep sleep mode"---*/
 		buf[0] = EVENT_MAP_HOST_CMD;
 		buf[1] = 0x11;
@@ -3753,19 +3328,6 @@ static int32_t nvt_ts_suspend(struct device *dev)
 	input_mt_sync(ts->input_dev);
 #endif
 	input_sync(ts->input_dev);
-
-	/* release pen event */
-	if (ts->pen_support) {
-		input_report_abs(ts->pen_input_dev, ABS_X, 0);
-		input_report_abs(ts->pen_input_dev, ABS_Y, 0);
-		input_report_abs(ts->pen_input_dev, ABS_PRESSURE, 0);
-		input_report_abs(ts->pen_input_dev, ABS_TILT_X, 0);
-		input_report_abs(ts->pen_input_dev, ABS_TILT_Y, 0);
-		input_report_abs(ts->pen_input_dev, ABS_DISTANCE, 0);
-		input_report_key(ts->pen_input_dev, BTN_TOUCH, 0);
-		input_report_key(ts->pen_input_dev, BTN_TOOL_PEN, 0);
-		input_sync(ts->pen_input_dev);
-	}
 
 	msleep(50);
 
@@ -3868,8 +3430,6 @@ static int32_t nvt_ts_resume(struct device *dev)
 	NVT_LOG("reload the game mode cmd");
 	nvt_game_mode_recovery();
 #endif
-
-	switch_pen_input_device();
 
 	NVT_LOG("end\n");
 

@@ -79,7 +79,6 @@
 
 //---Input device info.---
 #define NVT_TS_NAME "NVTCapacitiveTouchScreen"
-#define NVT_PEN_NAME "NVTCapacitivePen"
 
 //---Touch info.---
 #define TOUCH_DEFAULT_MAX_WIDTH 1800
@@ -90,11 +89,6 @@
 extern const uint16_t touch_key_array[TOUCH_KEY_NUM];
 #endif
 #define TOUCH_FORCE_NUM 1000
-//---for Pen---
-#define PEN_PRESSURE_MAX (4095)
-#define PEN_DISTANCE_MAX (1)
-#define PEN_TILT_MIN (-60)
-#define PEN_TILT_MAX (60)
 
 /* Enable only when module have tp reset pin and connected to host */
 #define NVT_TOUCH_SUPPORT_HW_RST 0
@@ -127,9 +121,6 @@ extern const uint16_t gesture_key_array[];
 #define NVT_TOUCH_ESD_PROTECT 0
 #define NVT_TOUCH_ESD_CHECK_PERIOD 1500	/* ms */
 #define NVT_TOUCH_WDT_RECOVERY 1
-
-#define CHECK_PEN_DATA_CHECKSUM 0
-#define NVT_PEN_CONNECT_STRATEGY
 
 #if BOOT_UPDATE_FIRMWARE
 #define SIZE_4KB 4096
@@ -164,15 +155,7 @@ struct nvt_ts_data {
 	struct delayed_work nvt_fwu_work;
 	struct delayed_work nvt_lockdown_work;
 	int db_wakeup;
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-	struct work_struct pen_charge_state_change_work;
-	struct notifier_block pen_charge_state_notifier;
-	bool pen_bluetooth_connect;
-	bool pen_charge_connect;
 	bool game_mode_enable;
-	struct device *dev;
-#endif
-	struct mutex pen_switch_lock;
 	int ic_state;
 	int gesture_command_delayed;
 	bool dev_pm_suspend;
@@ -220,15 +203,10 @@ struct nvt_ts_data {
 	uint8_t *xbuf;
 	struct mutex xbuf_lock;
 	bool irq_enabled;
-	bool pen_support;
-	bool stylus_resol_double;
 	bool fw_debug;
 	uint8_t x_gang_num;
 	uint8_t y_gang_num;
 	uint8_t debug_flag;
-	struct input_dev *pen_input_dev;
-	bool pen_input_dev_enable;
-	int8_t pen_phys[32];
 	int result_type;
 	int panel_index;
 #ifdef CONFIG_TOUCHSCREEN_NVT_DEBUG_FS
@@ -313,5 +291,4 @@ bool nvt_get_dbgfw_status(void);
 #if NVT_TOUCH_ESD_PROTECT
 extern void nvt_esd_check_enable(uint8_t enable);
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
-int switch_pen_input_device(void);
 #endif /* _LINUX_NVT_TOUCH_H */
