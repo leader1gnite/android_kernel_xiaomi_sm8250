@@ -5166,19 +5166,6 @@ void sde_encoder_kickoff(struct drm_encoder *drm_enc, bool is_error)
 		}
 	}
 
-	if (dsi_display && dsi_display->panel
-		&& (dsi_display->panel->mi_cfg.panel_id == 0x4D38324100360200 || dsi_display->panel->mi_cfg.panel_id == 0x4D38324100420200)
-		&& adj_mode.dsi_mode_flags & DSI_MODE_FLAG_VRR) {
-		if (dsi_display->panel->mi_cfg.last_fps == 60 && adj_mode.timing.refresh_rate != 120) {
-		    rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_SET_DISP_PEN_CLEAR);
-			if (rc) {
-				pr_err("Failed to send DSI_CMD_SET_DISP_PEN_CLEAR command\n");
-			}
-			sde_encoder_wait_for_event(drm_enc,MSM_ENC_VBLANK);
-			sde_encoder_vid_wait_for_active(drm_enc);
-		}
-	}
-
 	/* All phys encs are ready to go, trigger the kickoff */
 	_sde_encoder_kickoff_phys(sde_enc);
 
@@ -5194,19 +5181,6 @@ void sde_encoder_kickoff(struct drm_encoder *drm_enc, bool is_error)
 		SDE_EVT32_VERBOSE(ktime_to_ms(wakeup_time));
 		mod_timer(&sde_enc->vsync_event_timer,
 				nsecs_to_jiffies(ktime_to_ns(wakeup_time)));
-	}
-
-	if (dsi_display && dsi_display->panel
-		&& (dsi_display->panel->host_config.phy_type == DSI_PHY_TYPE_CPHY || dsi_display->panel->mi_cfg.panel_id == 0x4C38314100420400)
-		&& adj_mode.dsi_mode_flags & DSI_MODE_FLAG_VRR) {
-		dsi_panel_match_fps_pen_setting(dsi_display->panel, &adj_mode);
-		mutex_unlock(&dsi_display->panel->panel_lock);
-	} else if (dsi_display && dsi_display->panel
-		&& (dsi_display->panel->mi_cfg.panel_id == 0x4D38324100360200 || dsi_display->panel->mi_cfg.panel_id == 0x4D38324100420200)
-		&& adj_mode.dsi_mode_flags & DSI_MODE_FLAG_VRR) {
-		SDE_INFO("sde_dsi_panel_match_fps_pen_setting\n");
-		dsi_panel_match_fps_pen_setting(dsi_display->panel, &adj_mode);
-		mutex_unlock(&dsi_display->panel->panel_lock);
 	}
 
 	SDE_ATRACE_END("encoder_kickoff");

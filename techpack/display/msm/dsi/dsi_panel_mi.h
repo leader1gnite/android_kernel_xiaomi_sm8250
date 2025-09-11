@@ -420,9 +420,6 @@ int dsi_panel_read_greenish_gamma_setting(struct dsi_panel *panel);
 
 int dsi_panel_update_greenish_gamma_setting(struct dsi_panel *panel);
 
-int dsi_panel_match_fps_pen_setting(struct dsi_panel *panel,
-				struct dsi_display_mode *adj_mode);
-
 int dsi_panel_lockdowninfo_param_read(struct dsi_panel *panel);
 
 int dsi_panel_power_turn_off(bool on);
