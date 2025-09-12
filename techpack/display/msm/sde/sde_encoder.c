@@ -5131,7 +5131,7 @@ void sde_encoder_kickoff(struct drm_encoder *drm_enc, bool is_error)
 	struct dsi_display *dsi_display = NULL;
 	struct dsi_display_mode adj_mode;
 	ktime_t wakeup_time;
-	unsigned int i = 0;
+	unsigned int i,rc = 0;
 
 	if (!drm_enc) {
 		SDE_ERROR("invalid encoder\n");
