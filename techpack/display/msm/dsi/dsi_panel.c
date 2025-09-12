@@ -2231,12 +2231,20 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"mi,mdss-dsi-greenish-gamma-set-command",
 	"mi,mdss-dsi-black-setting-command",
 	"mi,mdss-dsi-read-lockdown-info-command",
+	"qcom,mdss-dsi-dispparam-pen-144hz-command",
+	"qcom,mdss-dsi-dispparam-pen-120hz-command",
+	"qcom,mdss-dsi-dispparam-pen-90hz-command",
+	"qcom,mdss-dsi-dispparam-pen-60hz-command",
+	"qcom,mdss-dsi-dispparam-pen-50hz-command",
+	"qcom,mdss-dsi-dispparam-pen-48hz-command",
+	"qcom,mdss-dsi-dispparam-pen-30hz-command",
 	"mi,mdss-dsi-disable-insert-black-command",
 	"mi,mdss-dsi-insert-black-screen-command",
 	"mi,mdss-dsi-round-on-command",
 	"mi,mdss-dsi-round-off-command",
 	"mi,mdss-dsi-dim-fp-dbv-max-in-hbm-command",
 	"mi,mdss-dsi-dim-fp-dbv-max-in-normal-command",
+	"mi,mdss-dsi-dispparam-pen-clear-command",
 	/* xiaomi add end */
 };
 
@@ -2356,12 +2364,20 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"mi,mdss-dsi-greenish-gamma-set-command-state",
 	"mi,mdss-dsi-black-setting-command-state",
 	"mi,mdss-dsi-read-lockdown-info-command-state",
+	"qcom,mdss-dsi-dispparam-pen-144hz-command-state",
+	"qcom,mdss-dsi-dispparam-pen-120hz-command-state",
+	"qcom,mdss-dsi-dispparam-pen-90hz-command-state",
+	"qcom,mdss-dsi-dispparam-pen-60hz-command-state",
+	"qcom,mdss-dsi-dispparam-pen-50hz-command-state",
+	"qcom,mdss-dsi-dispparam-pen-48hz-command-state",
+	"qcom,mdss-dsi-dispparam-pen-30hz-command-state",
 	"mi,mdss-dsi-disable-insert-black-command-state",
 	"mi,mdss-dsi-insert-black-screen-command-state",
 	"mi,mdss-dsi-round-on-command-state",
 	"mi,mdss-dsi-round-off-command-state",
 	"mi,mdss-dsi-dim-fp-dbv-max-in-hbm-command-state",
 	"mi,mdss-dsi-dim-fp-dbv-max-in-normal-command-state",
+	"mi,mdss-dsi-dispparam-pen-clear-command-state",
 	/* xiaomi add end */
 };
 
@@ -5249,6 +5265,23 @@ int dsi_panel_post_enable(struct dsi_panel *panel)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_POST_ON cmds, rc=%d\n",
 		       panel->name, rc);
 		goto error;
+	}
+error:
+	if (panel->host_config.phy_type == DSI_PHY_TYPE_CPHY || panel->mi_cfg.panel_id == 0x4C38314100420400) {
+		rc = dsi_panel_match_fps_pen_setting(panel, panel->cur_mode);
+		if (rc) {
+			DSI_ERR("[%s] failed to update TP fps code setting, rc=%d\n",
+				panel->name, rc);
+		}
+	} else if((panel->mi_cfg.panel_id == 0x4D38324100360200)||
+			(panel->mi_cfg.panel_id == 0x4D38324100420200)) {
+				DSI_INFO("[%s]  update TP fps code setting enter !!!!!!, rc=%d\n",
+						panel->name, rc);
+				rc = dsi_panel_match_fps_pen_setting(panel, panel->cur_mode);
+				if (rc) {
+					DSI_ERR("[%s] failed to update TP fps code setting, rc=%d\n",
+						panel->name, rc);
+				}
 	}
 
 	mutex_unlock(&panel->panel_lock);

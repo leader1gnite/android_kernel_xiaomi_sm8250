@@ -1328,6 +1328,51 @@ error:
 	return retval;
 }
 
+int dsi_panel_match_fps_pen_setting(struct dsi_panel *panel,
+				struct dsi_display_mode *adj_mode)
+{
+	int rc =0;
+	int retval = 0;
+	struct dsi_display_mode_priv_info *priv_info;
+
+	if (!panel || !panel->cur_mode || !panel->cur_mode->priv_info || !adj_mode) {
+		pr_err("invalid params\n");
+		return -EAGAIN;
+	}
+
+	priv_info = panel->cur_mode->priv_info;
+
+	if (!priv_info->cmd_sets[DSI_CMD_SET_DISP_PEN_120HZ].count) {
+		pr_debug("DSI_CMD_SET_DISP_PEN_120HZ not defined, return\n");
+		return 0;
+	}
+	/* match fps(120/60/30/144/48/50Hz) pen seeting cmd */
+	if (adj_mode->timing.refresh_rate == 120)
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_120HZ);
+	else if (adj_mode->timing.refresh_rate == 60)
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_60HZ);
+	else if (adj_mode->timing.refresh_rate == 30)
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_30HZ);
+	else if (adj_mode->timing.refresh_rate == 90)
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_90HZ);
+	else if (adj_mode->timing.refresh_rate == 144)
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_144HZ);
+	else if (adj_mode->timing.refresh_rate == 50)
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_50HZ);
+	else if (adj_mode->timing.refresh_rate == 48)
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DISP_PEN_48HZ);
+
+	if (rc) {
+		pr_err("Failed to send DSI_CMD_SET_DISP_PEN command\n");
+		retval = -EAGAIN;
+		goto error;
+	}else
+		pr_info("%s: refresh_rate[%d]\n", __func__, adj_mode->timing.refresh_rate);
+
+error:
+	return retval;
+}
+
 static int dsi_panel_read_gamma_opt_and_flash(struct dsi_panel *panel,
 				struct dsi_display_ctrl *ctrl)
 {
